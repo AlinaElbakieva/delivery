@@ -1,0 +1,9 @@
+
+private.pem
+public.pem
+
+app
+*.exe
+
+.vscode/
+.idea/
