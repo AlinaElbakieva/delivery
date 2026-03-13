@@ -11,7 +11,7 @@ import (
 	helper "my_project/delivery_bot/backend/auth-service/internal"
 	"my_project/delivery_bot/backend/auth-service/internal/config"
 	"my_project/delivery_bot/backend/auth-service/internal/crypto"
-	http_delivery "my_project/delivery_bot/backend/auth-service/internal/delivery"
+	http_delivery "my_project/delivery_bot/backend/auth-service/internal/handler"
 	"my_project/delivery_bot/backend/auth-service/internal/repo"
 	"my_project/delivery_bot/backend/auth-service/internal/router"
 	"my_project/delivery_bot/backend/auth-service/internal/usecase"
@@ -36,10 +36,14 @@ func main() {
 	if err != nil {
 		logger.Fatal("JWT init failed", zap.Error(err))
 	}
-	userRepo := repo.NewUserRepo()
-	otpRepo := repo.NewOTPRepo()
 
-	authUC := usecase.NewAuthUseCase(userRepo, otpRepo, jwtSvc, helper.SendOTPFake)
+	db := cfg.ConfigDB.ConnectDB()
+	rd := cfg.ConfigRedis.ConnectRedis(context.Background())
+
+	userRepo := repo.NewUserRepo(db)
+	otpRepo := repo.NewOTPRepo(rd)
+
+	authUC := usecase.NewAuthUseCase(userRepo, otpRepo, jwtSvc, helper.SendOTPFake, logger)
 	authHandler := http_delivery.NewAuthHandler(authUC, logger)
 
 	router := router.NewRouter(

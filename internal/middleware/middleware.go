@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"my_project/delivery_bot/backend/auth-service/internal/crypto"
+	"my_project/delivery_bot/backend/auth-service/pkg/auth_errors"
 
 	"github.com/labstack/echo/v4"
 )
@@ -19,7 +20,7 @@ func JWTMiddleware(jwtSvc *crypto.JWTService) echo.MiddlewareFunc {
 			tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 			_, claims, err := jwtSvc.ValidateToken(tokenStr, crypto.AccessToken)
 			if err != nil {
-				return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
+				return echo.NewHTTPError(http.StatusUnauthorized, auth_errors.ErrInvalidCredentials)
 			}
 			c.Set("user_id", claims["sub"])
 			c.Set("username", claims["username"])

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 type JWTService struct {
@@ -52,8 +53,7 @@ func NewJWTService(privateKeyPath, publicKeyPath, issuer string) (*JWTService, e
 		issuer:     issuer,
 	}, nil
 }
-
-func (j *JWTService) GenerateToken(userId int64, username, role string, typ TokenType) (string, error) {
+func (j *JWTService) GenerateToken(userId uuid.UUID, username, role string, typ TokenType) (string, error) {
 	var exp time.Duration
 	if typ == AccessToken {
 		exp = AccessTime

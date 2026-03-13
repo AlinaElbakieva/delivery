@@ -2,7 +2,7 @@ package router
 
 import (
 	helper "my_project/delivery_bot/backend/auth-service/internal"
-	http_delivery "my_project/delivery_bot/backend/auth-service/internal/delivery"
+	http_delivery "my_project/delivery_bot/backend/auth-service/internal/handler"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/labstack/echo/v4"

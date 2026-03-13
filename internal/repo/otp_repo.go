@@ -1,52 +1,40 @@
 package repo
 
 import (
-	"sync"
+	"context"
 	"time"
 
-	"my_project/delivery_bot/backend/auth-service/internal/domain"
+	"github.com/redis/go-redis/v9"
 )
 
-type IsOTP interface {
-	Save(username, code string, ttl time.Duration)
-	Get(username string) (string, bool)
-	Delete(username string)
+type OTPRepository interface {
+	Save(ctx context.Context, username, code string, ttl time.Duration) error
+	Get(ctx context.Context, username string) (string, bool, error)
+	Delete(ctx context.Context, username string) error
 }
 
 type OTPRepo struct {
-	data map[string]domain.OTP
-	mu   sync.RWMutex
+	rd *redis.Client
 }
 
-func NewOTPRepo() *OTPRepo {
-	return &OTPRepo{
-		data: make(map[string]domain.OTP),
+func NewOTPRepo(rd *redis.Client) *OTPRepo {
+	return &OTPRepo{rd: rd}
+}
+
+func (r *OTPRepo) Save(ctx context.Context, username, code string, ttl time.Duration) error {
+	return r.rd.Set(ctx, username, code, ttl).Err()
+}
+
+func (r *OTPRepo) Get(ctx context.Context, username string) (string, bool, error) {
+	val, err := r.rd.Get(ctx, username).Result()
+	if err == redis.Nil {
+		return "", false, nil
 	}
-}
-
-func (o *OTPRepo) Save(username, code string, ttl time.Duration) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-
-	o.data[username] = domain.OTP{
-		Code:      code,
-		ExpiresAt: time.Now().Add(ttl),
+	if err != nil {
+		return "", false, err
 	}
+	return val, true, nil
 }
-
-func (o *OTPRepo) Get(username string) (string, bool) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-
-	otp, ok := o.data[username]
-	if !ok || time.Now().After(otp.ExpiresAt) {
-		return "", false
-	}
-	return otp.Code, true
-}
-
-func (o *OTPRepo) Delete(username string) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	delete(o.data, username)
+func (r *OTPRepo) Delete(ctx context.Context, username string) error {
+	return r.rd.Del(ctx, username).Err()
 }

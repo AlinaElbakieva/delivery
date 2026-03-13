@@ -1,9 +1,16 @@
 package config
 
 import (
+	"context"
+	"database/sql"
+	"fmt"
 	"os"
 	"strconv"
 	"time"
+
+	_ "github.com/lib/pq"
+	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
 type Config struct {
@@ -15,19 +22,35 @@ type Config struct {
 	RefreshTTL     time.Duration
 	OTPTTL         time.Duration
 	OTPSenderEmail string // для реальной отправки email
+	ConfigDB       ConfigDB
+	ConfigRedis    ConfigRedis
+}
+
+type ConfigDB struct {
+	DBUser     string
+	DBPassword string
+	DBHost     string
+	DBPort     string
+	DBName     string
+}
+type ConfigRedis struct {
+	Addr        string
+	Password    string
+	UserName    string
+	DB          int
+	MaxRetries  int
+	DialTimeout time.Duration
+	Timeout     time.Duration
 }
 
 func LoadConfig() (*Config, error) {
 	cfg := &Config{}
-
-	// Порт
 	port := os.Getenv("API_PORT")
 	if port == "" {
 		port = "8080"
 	}
 	cfg.Port = port
 
-	// Пути к ключам
 	cfg.JWTPrivateKey = os.Getenv("JWT_PRIVATE_KEY")
 	if cfg.JWTPrivateKey == "" {
 		cfg.JWTPrivateKey = "private.pem"
@@ -38,14 +61,12 @@ func LoadConfig() (*Config, error) {
 		cfg.JWTPublicKey = "public.pem"
 	}
 
-	// Issuer токена
 	issuer := os.Getenv("JWT_ISSUER")
 	if issuer == "" {
 		issuer = "auth-service"
 	}
 	cfg.JWTIssuer = issuer
 
-	// TTL токенов
 	accessTTLStr := os.Getenv("ACCESS_TTL_MINUTES")
 	accessTTL := 15
 	if accessTTLStr != "" {
@@ -75,8 +96,75 @@ func LoadConfig() (*Config, error) {
 
 	cfg.OTPSenderEmail = os.Getenv("OTP_SENDER_EMAIL")
 	if cfg.OTPSenderEmail == "" {
-		cfg.OTPSenderEmail = "no-reply@example.com"
+		cfg.OTPSenderEmail = ""
+	}
+
+	dbUser := os.Getenv("DB_USER")
+	dbPassword := os.Getenv("DB_PASSWORD")
+	dbHost := os.Getenv("DB_HOST")
+	dbPort := os.Getenv("DB_PORT")
+	dbName := os.Getenv("DB_NAME")
+
+	cfg.ConfigDB = ConfigDB{
+		DBUser:     dbUser,
+		DBPassword: dbPassword,
+		DBHost:     dbHost,
+		DBPort:     dbPort,
+		DBName:     dbName,
+	}
+	redisHost := os.Getenv("REDIS_HOST")
+	redisPort := os.Getenv("REDIS_PORT")
+	addr := fmt.Sprintf("%s:%s", redisHost, redisPort)
+
+	redisPassword := os.Getenv("REDIS_USER_PASSWORD")
+	redisUser := os.Getenv("REDIS_USER")
+
+	cfg.ConfigRedis = ConfigRedis{
+		Addr:     addr,
+		Password: redisPassword,
+		UserName: redisUser,
 	}
 
 	return cfg, nil
+}
+
+func (cfg ConfigRedis) ConnectRedis(ctx context.Context) *redis.Client {
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
+	db := redis.NewClient(&redis.Options{
+		Addr:     cfg.Addr,
+		Password: cfg.Password,
+		Username: cfg.UserName,
+	})
+	if err := db.Ping(ctx).Err(); err != nil {
+		logger.Error("failed to connect to redis server:", zap.Error(err))
+		return nil
+	}
+	return db
+}
+func (cfg ConfigDB) ConnectDB() *sql.DB {
+	logger, _ := zap.NewProduction()
+	defer logger.Sync()
+	dsn := fmt.Sprintf(
+		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
+		cfg.DBUser,
+		cfg.DBPassword,
+		cfg.DBHost,
+		cfg.DBPort,
+		cfg.DBName,
+	)
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		logger.Error("failed to open DB: %v", zap.Error(err))
+		return nil
+	}
+
+	if err := db.Ping(); err != nil {
+		logger.Error("failed to ping DB: %v", zap.Error(err))
+		return nil
+	}
+
+	logger.Info("Connected to Postgres")
+
+	return db
 }
