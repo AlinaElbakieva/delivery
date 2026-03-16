@@ -1,7 +1,6 @@
 package config
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -9,21 +8,17 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
-	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
 type Config struct {
-	Port           string
-	JWTPrivateKey  string
-	JWTPublicKey   string
-	JWTIssuer      string
-	AccessTTL      time.Duration
-	RefreshTTL     time.Duration
-	OTPTTL         time.Duration
-	OTPSenderEmail string // для реальной отправки email
-	ConfigDB       ConfigDB
-	ConfigRedis    ConfigRedis
+	Port          string
+	JWTPrivateKey string
+	JWTPublicKey  string
+	JWTIssuer     string
+	AccessTTL     time.Duration
+	RefreshTTL    time.Duration
+	ConfigDB      ConfigDB
 }
 
 type ConfigDB struct {
@@ -32,15 +27,6 @@ type ConfigDB struct {
 	DBHost     string
 	DBPort     string
 	DBName     string
-}
-type ConfigRedis struct {
-	Addr        string
-	Password    string
-	UserName    string
-	DB          int
-	MaxRetries  int
-	DialTimeout time.Duration
-	Timeout     time.Duration
 }
 
 func LoadConfig() (*Config, error) {
@@ -85,20 +71,6 @@ func LoadConfig() (*Config, error) {
 	}
 	cfg.RefreshTTL = time.Duration(refreshTTL) * time.Hour
 
-	otpTTLStr := os.Getenv("OTP_TTL_MINUTES")
-	otpTTL := 5
-	if otpTTLStr != "" {
-		if v, err := strconv.Atoi(otpTTLStr); err == nil {
-			otpTTL = v
-		}
-	}
-	cfg.OTPTTL = time.Duration(otpTTL) * time.Minute
-
-	cfg.OTPSenderEmail = os.Getenv("OTP_SENDER_EMAIL")
-	if cfg.OTPSenderEmail == "" {
-		cfg.OTPSenderEmail = ""
-	}
-
 	dbUser := os.Getenv("DB_USER")
 	dbPassword := os.Getenv("DB_PASSWORD")
 	dbHost := os.Getenv("DB_HOST")
@@ -112,36 +84,10 @@ func LoadConfig() (*Config, error) {
 		DBPort:     dbPort,
 		DBName:     dbName,
 	}
-	redisHost := os.Getenv("REDIS_HOST")
-	redisPort := os.Getenv("REDIS_PORT")
-	addr := fmt.Sprintf("%s:%s", redisHost, redisPort)
-
-	redisPassword := os.Getenv("REDIS_USER_PASSWORD")
-	redisUser := os.Getenv("REDIS_USER")
-
-	cfg.ConfigRedis = ConfigRedis{
-		Addr:     addr,
-		Password: redisPassword,
-		UserName: redisUser,
-	}
 
 	return cfg, nil
 }
 
-func (cfg ConfigRedis) ConnectRedis(ctx context.Context) *redis.Client {
-	logger, _ := zap.NewProduction()
-	defer logger.Sync()
-	db := redis.NewClient(&redis.Options{
-		Addr:     cfg.Addr,
-		Password: cfg.Password,
-		Username: cfg.UserName,
-	})
-	if err := db.Ping(ctx).Err(); err != nil {
-		logger.Error("failed to connect to redis server:", zap.Error(err))
-		return nil
-	}
-	return db
-}
 func (cfg ConfigDB) ConnectDB() *sql.DB {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()

@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 )
 
 type Router struct {
@@ -29,6 +30,14 @@ func (r *Router) Setup() *echo.Echo {
 	e.HideBanner = true
 	e.HidePort = true
 
+	e.Use(middleware.Recover())
+	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins:     []string{"http://localhost:3000", "http://127.0.0.1:3000"},
+		AllowMethods:     []string{echo.GET, echo.POST, echo.PUT, echo.DELETE, echo.OPTIONS},
+		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+		AllowCredentials: true,
+	}))
+
 	v := validator.New()
 	v.RegisterValidation("password", helper.PasswordValidation)
 	e.Validator = &CustomValidator{Validator: v}
@@ -37,8 +46,10 @@ func (r *Router) Setup() *echo.Echo {
 
 	apiV1.POST("/register", r.authHandler.Register)
 	apiV1.POST("/login", r.authHandler.Login)
-	apiV1.POST("/otp/request", r.authHandler.Login) // reuse login for OTP generation
-	apiV1.POST("/otp/verify", r.authHandler.VerifyOTP)
+	apiV1.GET("/email/confirm", r.authHandler.ConfirmEmail)
+	apiV1.POST("/email/confirm", r.authHandler.ConfirmEmail)
 	apiV1.POST("/refresh", r.authHandler.Refresh)
+	apiV1.POST("/password/forgot", r.authHandler.ForgotPassword)
+	apiV1.POST("/password/reset", r.authHandler.ResetPassword)
 	return e
 }

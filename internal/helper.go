@@ -32,8 +32,17 @@ func PasswordValidation(fl validator.FieldLevel) bool {
 	return hasLetter && hasDigit && hasSpecial
 }
 
-// for local test
 func SendOTPFake(username, code string) error {
 	fmt.Printf("OTP для %s: %s\n", username, code)
+	return nil
+}
+
+func SendConfirmEmailFake(email, link string) error {
+	fmt.Printf("Confirm email for %s: %s\n", email, link)
+	return nil
+}
+
+func SendResetPasswordEmailFake(email, link string) error {
+	fmt.Printf("Reset password email for %s: %s\n", email, link)
 	return nil
 }

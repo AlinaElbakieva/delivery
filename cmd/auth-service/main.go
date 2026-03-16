@@ -20,8 +20,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// todo запись в базу данных
-
 func main() {
 	var wg sync.WaitGroup
 	logger, _ := zap.NewProduction()
@@ -38,12 +36,22 @@ func main() {
 	}
 
 	db := cfg.ConfigDB.ConnectDB()
-	rd := cfg.ConfigRedis.ConnectRedis(context.Background())
 
 	userRepo := repo.NewUserRepo(db)
-	otpRepo := repo.NewOTPRepo(rd)
+	emailConfirmRepo := repo.NewEmailConfirmRepo(db)
+	passwordResetRepo := repo.NewPasswordResetRepo(db)
 
-	authUC := usecase.NewAuthUseCase(userRepo, otpRepo, jwtSvc, helper.SendOTPFake, logger)
+	authUC := usecase.NewAuthUseCase(
+		userRepo,
+		emailConfirmRepo,
+		passwordResetRepo,
+		jwtSvc,
+		"http://localhost:3000/confirm-email",
+		"http://localhost:3000/reset-password",
+		helper.SendConfirmEmailFake,
+		helper.SendResetPasswordEmailFake,
+		logger,
+	)
 	authHandler := http_delivery.NewAuthHandler(authUC, logger)
 
 	router := router.NewRouter(
