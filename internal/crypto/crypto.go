@@ -15,6 +15,14 @@ type JWTService struct {
 	publicKey  *rsa.PublicKey
 	issuer     string
 }
+
+type AuthClaims struct {
+	jwt.RegisteredClaims
+	Username string    `json:"username"`
+	Role     string    `json:"role"`
+	Typ      TokenType `json:"typ"`
+}
+
 type TokenType string
 
 const (
@@ -53,6 +61,7 @@ func NewJWTService(privateKeyPath, publicKeyPath, issuer string) (*JWTService, e
 		issuer:     issuer,
 	}, nil
 }
+
 func (j *JWTService) GenerateToken(userId uuid.UUID, username, role string, typ TokenType) (string, error) {
 	var exp time.Duration
 	if typ == AccessToken {
@@ -61,38 +70,48 @@ func (j *JWTService) GenerateToken(userId uuid.UUID, username, role string, typ 
 		exp = RefreshTime
 	}
 
-	claims := jwt.MapClaims{
-		"sub":      userId,
-		"username": username,
-		"role":     role,
-		"typ":      string(typ),
-		"iss":      j.issuer,
-		"exp":      time.Now().Add(exp).Unix(),
+	now := time.Now()
+	claims := &AuthClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   userId.String(),
+			Issuer:    j.issuer,
+			ExpiresAt: jwt.NewNumericDate(now.Add(exp)),
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+		},
+		Username: username,
+		Role:     role,
+		Typ:      typ,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	return token.SignedString(j.privateKey)
 }
 
-func (j *JWTService) ValidateToken(tokenStr string, expectedType TokenType) (*jwt.Token, jwt.MapClaims, error) {
-	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+func (j *JWTService) ValidateToken(tokenStr string, expectedType TokenType) (*AuthClaims, error) {
+	claims := &AuthClaims{}
+
+	token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 			return nil, errors.New("unexpected signing method")
 		}
 		return j.publicKey, nil
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok || !token.Valid {
-		return nil, nil, errors.New("invalid token claims")
+	if !token.Valid {
+		return nil, errors.New("invalid token")
 	}
 
-	if claims["typ"] != string(expectedType) || claims["iss"] != j.issuer {
-		return nil, nil, errors.New("invalid token type or issuer")
+	if claims.RegisteredClaims.Issuer != j.issuer {
+		return nil, errors.New("invalid token issuer")
 	}
 
-	return token, claims, nil
+	if claims.Typ != expectedType {
+		return nil, errors.New("invalid token type")
+	}
+
+	return claims, nil
 }

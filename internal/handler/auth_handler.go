@@ -2,7 +2,6 @@ package http
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 
 	"my_project/delivery_bot/backend/auth-service/internal/domain"
@@ -42,11 +41,12 @@ func (h *AuthHandler) Register(c echo.Context) error {
 	}
 
 	if err := h.usecase.Register(ctx, req.Username, req.Password, req.Role, req.Email); err != nil {
-		h.logger.Warn("Register failed", zap.Error(err))
 		if errors.Is(err, auth_errors.ErrUserAlreadyExists) {
-			return echo.NewHTTPError(http.StatusConflict, "user with this email already exists")
+			h.logger.Warn("Register failed: user already exists", zap.String("email", req.Email), zap.String("username", req.Username))
+			return echo.NewHTTPError(http.StatusConflict, auth_errors.ErrUserAlreadyExists)
 		}
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid request")
+		h.logger.Error("Register failed: internal error", zap.Error(err))
+		return echo.NewHTTPError(http.StatusInternalServerError, "internal error")
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "registered; check your email to confirm"})
 }
@@ -68,11 +68,16 @@ func (h *AuthHandler) Login(c echo.Context) error {
 	}
 	access, refresh, err := h.usecase.Login(ctx, req.Email, req.Password)
 	if err != nil {
-		h.logger.Warn("Login failed", zap.Error(err))
 		if errors.Is(err, auth_errors.ErrEmailNotVerified) {
+			h.logger.Info("Login failed: email not verified", zap.String("email", req.Email))
 			return echo.NewHTTPError(http.StatusForbidden, auth_errors.ErrEmailNotVerified)
 		}
-		return echo.NewHTTPError(http.StatusUnauthorized, auth_errors.ErrInvalidCredentials)
+		if errors.Is(err, auth_errors.ErrInvalidCredentials) {
+			h.logger.Info("Login failed: invalid credentials", zap.String("email", req.Email))
+			return echo.NewHTTPError(http.StatusUnauthorized, auth_errors.ErrInvalidCredentials)
+		}
+		h.logger.Error("Login failed: internal error", zap.Error(err))
+		return echo.NewHTTPError(http.StatusInternalServerError, "internal error")
 	}
 	return c.JSON(http.StatusOK, map[string]string{
 		"access_token":  access,
@@ -86,11 +91,30 @@ func (h *AuthHandler) Refresh(c echo.Context) error {
 		RefreshToken string `json:"refresh_token"`
 	}
 	if err := c.Bind(&req); err != nil {
+		h.logger.Warn("Invalid refresh request body", zap.Error(err))
 		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInvalidRequest)
 	}
-	access, refresh, err := h.usecase.RefreshToken(ctx, req.RefreshToken)
+
+	token := req.RefreshToken
+	if token == "" {
+		if cookie, err := c.Cookie("refresh_token"); err == nil {
+			token = cookie.Value
+		}
+	}
+
+	if token == "" {
+		h.logger.Info("Refresh failed: missing refresh token")
+		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInvalidRequest)
+	}
+
+	access, refresh, err := h.usecase.RefreshToken(ctx, token)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, auth_errors.ErrInvalidRefreshToken)
+		if errors.Is(err, auth_errors.ErrInvalidRefreshToken) {
+			h.logger.Info("Refresh failed: invalid refresh token")
+			return echo.NewHTTPError(http.StatusUnauthorized, auth_errors.ErrInvalidRefreshToken)
+		}
+		h.logger.Error("RefreshToken failed: internal error", zap.Error(err))
+		return echo.NewHTTPError(http.StatusInternalServerError, "internal error")
 	}
 	return c.JSON(http.StatusOK, map[string]string{
 		"access_token":  access,
@@ -109,16 +133,17 @@ func (h *AuthHandler) ConfirmEmail(c echo.Context) error {
 		tokenStr = body.Token
 	}
 	if tokenStr == "" {
-		h.logger.Info(fmt.Sprint("token required"))
-		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInternal)
+		h.logger.Info("ConfirmEmail failed: token required")
+		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInvalidRequest)
 	}
 	token, err := uuid.Parse(tokenStr)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInternal)
+		h.logger.Info("ConfirmEmail failed: invalid token format")
+		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInvalidRequest)
 	}
 	if err := h.usecase.ConfirmEmail(ctx, token); err != nil {
-		h.logger.Warn("ConfirmEmail failed", zap.Error(err))
-		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInternal)
+		h.logger.Error("ConfirmEmail failed: internal error", zap.Error(err))
+		return echo.NewHTTPError(http.StatusInternalServerError, "internal error")
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "email confirmed"})
 }
@@ -139,7 +164,7 @@ func (h *AuthHandler) ForgotPassword(c echo.Context) error {
 	}
 
 	if err := h.usecase.ForgotPassword(ctx, req.Email); err != nil {
-		h.logger.Warn("ForgotPassword failed", zap.Error(err))
+		h.logger.Error("ForgotPassword failed: internal error", zap.Error(err))
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "if this email exists, reset link was sent"})
 }
@@ -162,12 +187,13 @@ func (h *AuthHandler) ResetPassword(c echo.Context) error {
 
 	token, err := uuid.Parse(req.Token)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInternal)
+		h.logger.Info("ResetPassword failed: invalid token format")
+		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInvalidRequest)
 	}
 
 	if err := h.usecase.ResetPassword(ctx, token, req.Password); err != nil {
-		h.logger.Warn("ResetPassword failed", zap.Error(err))
-		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInternal)
+		h.logger.Error("ResetPassword failed: internal error", zap.Error(err))
+		return echo.NewHTTPError(http.StatusInternalServerError, "internal error")
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "password has been reset"})

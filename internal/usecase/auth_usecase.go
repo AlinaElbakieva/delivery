@@ -9,7 +9,6 @@ import (
 	"my_project/delivery_bot/backend/auth-service/pkg/auth_errors"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
@@ -17,7 +16,6 @@ import (
 
 type UserRepository interface {
 	Create(ctx context.Context, user *domain.User) error
-	SaveToken(ctx context.Context, id uuid.UUID, access, refresh string) error
 	SetEmailVerified(ctx context.Context, userID uuid.UUID) error
 	GetByUserName(ctx context.Context, username string) (*domain.User, error)
 	GetByEmail(ctx context.Context, email string) (*domain.User, error)
@@ -39,7 +37,7 @@ type PasswordResetRepository interface {
 
 type JWTService interface {
 	GenerateToken(userId uuid.UUID, username, role string, tokenType crypto.TokenType) (string, error)
-	ValidateToken(token string, tokenType crypto.TokenType) (*jwt.Token, jwt.MapClaims, error)
+	ValidateToken(token string, tokenType crypto.TokenType) (*crypto.AuthClaims, error)
 }
 
 type AuthUseCase struct {
@@ -78,8 +76,14 @@ func NewAuthUseCase(
 	}
 }
 
-func (a *AuthUseCase) Register(ctx context.Context, username, password, role, email string) error {
+const defaultUserRole = "USER"
+
+func (a *AuthUseCase) Register(ctx context.Context, username, password, _ string, email string) error {
 	if existing, _ := a.userRepo.GetByEmail(ctx, email); existing != nil {
+		return fmt.Errorf("%w", auth_errors.ErrUserAlreadyExists)
+	}
+
+	if existing, _ := a.userRepo.GetByUserName(ctx, username); existing != nil {
 		return fmt.Errorf("%w", auth_errors.ErrUserAlreadyExists)
 	}
 
@@ -93,12 +97,16 @@ func (a *AuthUseCase) Register(ctx context.Context, username, password, role, em
 		UserName:      username,
 		Password:      string(hash),
 		Email:         email,
-		Role:          role,
+		Role:          defaultUserRole,
+		IsActive:      true,
 		EmailVerified: false,
 		CreatedAt:     time.Now(),
 	}
 
 	if err := a.userRepo.Create(ctx, &user); err != nil {
+		if errors.Is(err, auth_errors.ErrUserAlreadyExists) {
+			return fmt.Errorf("%w", auth_errors.ErrUserAlreadyExists)
+		}
 		a.logger.Warn("create user error", zap.Error(err))
 		return errors.New("error register user")
 	}
@@ -126,10 +134,15 @@ func (a *AuthUseCase) Login(ctx context.Context, email, password string) (string
 		a.logger.Error("error get user by email", zap.Error(err))
 		return "", "", fmt.Errorf("login: %w", auth_errors.ErrInvalidCredentials)
 	}
-	a.logger.Info(fmt.Sprintf("user: %+v", user))
+	a.logger.Info("login attempt", zap.String("user_id", user.Id.String()), zap.String("email", user.Email))
 	if !user.EmailVerified {
 		a.logger.Error("email not verified")
 		return "", "", fmt.Errorf("login: %w", auth_errors.ErrEmailNotVerified)
+	}
+
+	if !user.IsActive {
+		a.logger.Error("inactive user login attempt", zap.String("user_id", user.Id.String()), zap.String("email", user.Email))
+		return "", "", fmt.Errorf("login: %w", auth_errors.ErrInvalidCredentials)
 	}
 
 	if bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)) != nil {
@@ -146,11 +159,6 @@ func (a *AuthUseCase) Login(ctx context.Context, email, password string) (string
 	refresh, err := a.jwt.GenerateToken(user.Id, user.UserName, user.Role, crypto.RefreshToken)
 	if err != nil {
 		a.logger.Error("error generate refresh token", zap.Error(err))
-		return "", "", auth_errors.ErrInternal
-	}
-
-	if err := a.userRepo.SaveToken(ctx, user.Id, access, refresh); err != nil {
-		a.logger.Error("error save access_token and refresh_token", zap.Error(err))
 		return "", "", auth_errors.ErrInternal
 	}
 
@@ -225,14 +233,19 @@ func (a *AuthUseCase) ResetPassword(ctx context.Context, token uuid.UUID, newPas
 }
 
 func (a *AuthUseCase) RefreshToken(ctx context.Context, refreshToken string) (string, string, error) {
-	_, claims, err := a.jwt.ValidateToken(refreshToken, crypto.RefreshToken)
+	claims, err := a.jwt.ValidateToken(refreshToken, crypto.RefreshToken)
 	if err != nil {
 		return "", "", fmt.Errorf("%w", auth_errors.ErrInvalidRefreshToken)
 	}
 
-	userId, err := uuid.Parse(claims["sub"].(string))
-	username := claims["username"].(string)
-	role := claims["role"].(string)
+	userId, err := uuid.Parse(claims.RegisteredClaims.Subject)
+	if err != nil {
+		a.logger.Warn("invalid subject in refresh token", zap.Error(err))
+		return "", "", fmt.Errorf("%w", auth_errors.ErrInvalidRefreshToken)
+	}
+
+	username := claims.Username
+	role := claims.Role
 
 	access, err := a.jwt.GenerateToken(userId, username, role, crypto.AccessToken)
 	if err != nil {

@@ -8,11 +8,11 @@ import (
 	"my_project/delivery_bot/backend/auth-service/pkg/auth_errors"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 type UserRepository interface {
 	Create(ctx context.Context, user *domain.User) error
-	SaveToken(ctx context.Context, userId uuid.UUID, access, refresh string) error
 	SetEmailVerified(ctx context.Context, userID uuid.UUID) error
 	GetByUserName(ctx context.Context, username string) (*domain.User, error)
 	GetByEmail(ctx context.Context, email string) (*domain.User, error)
@@ -47,23 +47,14 @@ func (r *UserRepo) Create(ctx context.Context, user *domain.User) error {
 		user.EmailVerified,
 	).Scan(&id, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
+		// Обработка конфликтов уникальности name/email
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			// Для любых уникальных ограничений на name/email возвращаем "user already exists"
+			return fmt.Errorf("%w", auth_errors.ErrUserAlreadyExists)
+		}
 		return err
 	}
 	user.Id = id
-	return nil
-}
-func (r *UserRepo) SaveToken(ctx context.Context, userId uuid.UUID, access, refresh string) error {
-	query := `
-		UPDATE users
-		SET access_token = $1,
-		    refresh_token = $2,
-		    updated_at = NOW()
-		WHERE id = $3
-	`
-	_, err := r.db.ExecContext(ctx, query, access, refresh, userId)
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
