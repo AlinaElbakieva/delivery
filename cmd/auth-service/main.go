@@ -46,8 +46,8 @@ func main() {
 		emailConfirmRepo,
 		passwordResetRepo,
 		jwtSvc,
-		"http://localhost:3000/confirm-email",
-		"http://localhost:3000/reset-password",
+		"http://localhost:3000/confirm-email",  // TODO: change to the actual URL
+		"http://localhost:3000/reset-password", // TODO: change to the actual URL
 		helper.SendConfirmEmailFake,
 		helper.SendResetPasswordEmailFake,
 		logger,

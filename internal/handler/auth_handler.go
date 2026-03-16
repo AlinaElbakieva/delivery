@@ -2,6 +2,7 @@ package http
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"my_project/delivery_bot/backend/auth-service/internal/domain"
@@ -57,6 +58,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		Email    string `json:"email" validate:"required,email"`
 		Password string `json:"password" validate:"required"`
 	}
+
 	if err := c.Bind(&req); err != nil {
 		h.logger.Warn("Invalid login request", zap.Error(err))
 		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInvalidRequest)
@@ -68,7 +70,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 	if err != nil {
 		h.logger.Warn("Login failed", zap.Error(err))
 		if errors.Is(err, auth_errors.ErrEmailNotVerified) {
-			return echo.NewHTTPError(http.StatusForbidden, "email not verified")
+			return echo.NewHTTPError(http.StatusForbidden, auth_errors.ErrEmailNotVerified)
 		}
 		return echo.NewHTTPError(http.StatusUnauthorized, auth_errors.ErrInvalidCredentials)
 	}
@@ -107,15 +109,16 @@ func (h *AuthHandler) ConfirmEmail(c echo.Context) error {
 		tokenStr = body.Token
 	}
 	if tokenStr == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "token required")
+		h.logger.Info(fmt.Sprint("token required"))
+		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInternal)
 	}
 	token, err := uuid.Parse(tokenStr)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInvalidOTP)
+		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInternal)
 	}
 	if err := h.usecase.ConfirmEmail(ctx, token); err != nil {
 		h.logger.Warn("ConfirmEmail failed", zap.Error(err))
-		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInvalidOTP)
+		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInternal)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "email confirmed"})
 }
@@ -159,12 +162,12 @@ func (h *AuthHandler) ResetPassword(c echo.Context) error {
 
 	token, err := uuid.Parse(req.Token)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInvalidOTP)
+		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInternal)
 	}
 
 	if err := h.usecase.ResetPassword(ctx, token, req.Password); err != nil {
 		h.logger.Warn("ResetPassword failed", zap.Error(err))
-		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInvalidOTP)
+		return echo.NewHTTPError(http.StatusBadRequest, auth_errors.ErrInternal)
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "password has been reset"})

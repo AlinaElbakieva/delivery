@@ -140,18 +140,18 @@ func (a *AuthUseCase) Login(ctx context.Context, email, password string) (string
 	access, err := a.jwt.GenerateToken(user.Id, user.UserName, user.Role, crypto.AccessToken)
 	if err != nil {
 		a.logger.Error("error generate access token", zap.Error(err))
-		return "", "", auth_errors.ErrVerifyOTP
+		return "", "", auth_errors.ErrInternal
 	}
 
 	refresh, err := a.jwt.GenerateToken(user.Id, user.UserName, user.Role, crypto.RefreshToken)
 	if err != nil {
 		a.logger.Error("error generate refresh token", zap.Error(err))
-		return "", "", auth_errors.ErrVerifyOTP
+		return "", "", auth_errors.ErrInternal
 	}
 
 	if err := a.userRepo.SaveToken(ctx, user.Id, access, refresh); err != nil {
 		a.logger.Error("error save access_token and refresh_token", zap.Error(err))
-		return "", "", auth_errors.ErrVerifyOTP
+		return "", "", auth_errors.ErrInternal
 	}
 
 	return access, refresh, nil
@@ -163,7 +163,7 @@ func (a *AuthUseCase) ConfirmEmail(ctx context.Context, token uuid.UUID) error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("%w", auth_errors.ErrInvalidOTP)
+		return fmt.Errorf("%w", auth_errors.ErrInternal)
 	}
 	if err := a.userRepo.SetEmailVerified(ctx, userID); err != nil {
 		return err
@@ -201,7 +201,7 @@ func (a *AuthUseCase) ResetPassword(ctx context.Context, token uuid.UUID, newPas
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("%w", auth_errors.ErrInvalidOTP)
+		return fmt.Errorf("%w", auth_errors.ErrInternal)
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
