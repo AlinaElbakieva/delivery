@@ -1,12 +1,24 @@
 package domain
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type User struct {
-	Id        int64
-	UserName  string
-	Email     string
-	Password  string
-	Role      string
-	CreatedAt time.Time
+	Id            uuid.UUID
+	UserName      string
+	Email         string
+	Password      string
+	Role          string
+	Street        string
+	House         string
+	Apartment     string
+	Entrance      string
+	IsActive      bool
+	EmailVerified bool
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	DeletedAt     *time.Time
 }

@@ -11,7 +11,7 @@ import (
 	helper "my_project/delivery_bot/backend/auth-service/internal"
 	"my_project/delivery_bot/backend/auth-service/internal/config"
 	"my_project/delivery_bot/backend/auth-service/internal/crypto"
-	http_delivery "my_project/delivery_bot/backend/auth-service/internal/delivery"
+	http_delivery "my_project/delivery_bot/backend/auth-service/internal/handler"
 	"my_project/delivery_bot/backend/auth-service/internal/repo"
 	"my_project/delivery_bot/backend/auth-service/internal/router"
 	"my_project/delivery_bot/backend/auth-service/internal/usecase"
@@ -19,8 +19,6 @@ import (
 	"github.com/labstack/gommon/log"
 	"go.uber.org/zap"
 )
-
-// todo запись в базу данных
 
 func main() {
 	var wg sync.WaitGroup
@@ -36,10 +34,24 @@ func main() {
 	if err != nil {
 		logger.Fatal("JWT init failed", zap.Error(err))
 	}
-	userRepo := repo.NewUserRepo()
-	otpRepo := repo.NewOTPRepo()
 
-	authUC := usecase.NewAuthUseCase(userRepo, otpRepo, jwtSvc, helper.SendOTPFake)
+	db := cfg.ConfigDB.ConnectDB()
+
+	userRepo := repo.NewUserRepo(db)
+	emailConfirmRepo := repo.NewEmailConfirmRepo(db)
+	passwordResetRepo := repo.NewPasswordResetRepo(db)
+
+	authUC := usecase.NewAuthUseCase(
+		userRepo,
+		emailConfirmRepo,
+		passwordResetRepo,
+		jwtSvc,
+		"http://localhost:3000/confirm-email",  // TODO: change to the actual URL
+		"http://localhost:3000/reset-password", // TODO: change to the actual URL
+		helper.SendConfirmEmailFake,
+		helper.SendResetPasswordEmailFake,
+		logger,
+	)
 	authHandler := http_delivery.NewAuthHandler(authUC, logger)
 
 	router := router.NewRouter(
